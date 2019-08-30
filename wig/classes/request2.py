@@ -3,6 +3,7 @@ import hashlib
 import re
 import string
 import random
+import ssl
 import urllib.request
 import urllib.parse
 from html.parser import HTMLParser
@@ -24,7 +25,7 @@ def _clean_page(page):
 	# this the same method nmap's http.lua uses for error page detection
 	# nselib/http.lua: clean_404
 	# remove information from the page that might not be static
-	
+
 	# time
 	page = re.sub(b'(\d?\d:?){2,3}', b'',page)
 	page = re.sub(b'AM', b'',page, flags=re.IGNORECASE)
@@ -42,12 +43,12 @@ def _clean_page(page):
 	page = re.sub( b'(\d){6}', '',page)
 	page = re.sub( b'\d{2}-\d{2}-\d{2}', b'',page)
 	page = re.sub( b'\d{2}/\d{2}/\d{2}', b'',page)
-	
+
 	# links and paths
 	page = re.sub( b'/[^ ]+',  b'', page)
 	page = re.sub( b'[a-zA-Z]:\\[^ ]+',  b'', page)
 
-	# return the fingerprint of the stripped page 
+	# return the fingerprint of the stripped page
 	return hashlib.md5(page).hexdigest().lower()
 
 
@@ -106,11 +107,11 @@ class ErrorHandler(urllib.request.HTTPDefaultErrorHandler):
 
 class RedirectHandler(urllib.request.HTTPRedirectHandler):
 	"""
-	This currently only checks if the redirection netloc is 
+	This currently only checks if the redirection netloc is
 	the same as the the netloc for the request.
 
 	NOTE: this is very strict, as it will not allow redirections
-	      from 'example.com' to 'www.example.com' 
+	      from 'example.com' to 'www.example.com'
 	"""
 
 	def http_error_302(self, req, fp, code, msg, headers):
@@ -182,7 +183,7 @@ class Response:
 		else:
 			# find content-type definitions
 			content_types = {'text': False, 'charset': None}
-			
+
 			for item in self.headers[content_type].split(';'):
 				if 'text' in item:
 					content_types['text'] = True
@@ -197,7 +198,7 @@ class Response:
 				self.body = str(body, 'ISO-8859-1', errors='replace')
 			else:
 				self.body = str(body, errors='replace')
-		
+
 
 	def __repr__(self):
 		def get_string(r):
@@ -207,10 +208,10 @@ class Response:
 			string += '\n\n'
 			string += 'MD5:            ' + self.md5 + '\n'
 			string += 'MD5 Error page: ' + self.md5_404 + '\n'
-			return string 
+			return string
 
 		return get_string(self)
-		
+
 
 class Requester:
 	def __init__(self, options, data):
@@ -242,8 +243,11 @@ class Requester:
 
 		if redirect_handler:
 			args.append(RedirectHandler)
-		
-		opener = urllib.request.build_opener(*args)
+
+		context = ssl.create_default_context()
+		context.check_hostname = False
+		context.verify_mode = ssl.CERT_NONE
+		opener = urllib.request.build_opener(*args, urllib.request.HTTPSHandler(context=context))
 		opener.addheaders = [('User-agent', self.user_agent)]
 		return opener
 
@@ -253,12 +257,12 @@ class Requester:
 		# the original url
 		org_url = self.url_data
 
-		# get an opener doing redirections 
+		# get an opener doing redirections
 		try:
 			opener = self._create_fetcher(redirect_handler=False)
 			response = opener.open(self.url)
 		except:
-			raise UnknownHostName(self.url)	
+			raise UnknownHostName(self.url)
 
 		# the new url
 		new_url = parse(response.geturl())
@@ -286,9 +290,9 @@ class Requester:
 		request = urllib.request.Request(url, method=method)
 		response = opener.open(request)
 		R = _create_response(response)
-		
+
 		if run_type == 'DiscoverMore':
-			R.crawled_response = True	
+			R.crawled_response = True
 
 		self.cache[url] = R
 		self.cache[response.geturl()] = R
@@ -305,11 +309,11 @@ class Requester:
 		# check if the url is out of scope
 		url_data = urllib.parse.urlparse(complete_url)
 		host_data = urllib.parse.urlparse(self.url)
-		
+
 		# check if it is possible to use 'HEAD' instead of 'GET'
 		# this should be possible for all fingerprints, that do not
 		# have a specified a 'code' or 'code' is '200'.
-		# if 'code' is 'any' or something other than '200', the 
+		# if 'code' is 'any' or something other than '200', the
 		# resource should be fetched.
 		can_use_head = True
 		for fp in fp_list:
@@ -321,7 +325,7 @@ class Requester:
 
 		elif not complete_url in self.cache:
 			try:
-				# if it is possible to use 'HEAD', use it. If the result is 
+				# if it is possible to use 'HEAD', use it. If the result is
 				# a '200', request the resource with a 'GET'
 				get_resource = True
 				if can_use_head:
@@ -329,12 +333,12 @@ class Requester:
 					if not response.code == 200:
 						get_resource = False
 
-				# Fetch the ressource if the resource exists or 
+				# Fetch the ressource if the resource exists or
 				# if the fingerprint requires any response
 				if get_resource:
 					self.do_request(complete_url, run_type, method='GET')
 					R = self.cache[complete_url]
-			
+
 			except Exception as e:
 				pass
 		else:
@@ -349,7 +353,7 @@ class Requester:
 
 			for fp_list in fp_lists:
 				future_list.append(executor.submit(self.request, fp_list, run_type))
-				
+
 			for future in concurrent.futures.as_completed(future_list):
 				self.requested.put(future.result())
 
